@@ -32,37 +32,3 @@ def create_new_token():
             logging.error(f"Ошибка получения iam_token. Статус-код: {response.status_code}")
     except Exception as e:
         logging.error(f"Ошибка получения iam_token: {e}")
-
-
-# чтение iam_token и folder_id из файла
-def get_creds():
-    try:
-        # чтение iam_token
-        with open(IAM_TOKEN_PATH, 'r') as f:
-            file_data = json.load(f)
-            expiration = datetime.strptime(file_data["expires_at"][:26], "%Y-%m-%dT%H:%M:%S.%f")
-        # если срок годности истёк
-        if expiration < datetime.now():
-            logging.info("Срок годности iam_token истёк")
-            # получаем новый iam_token
-            create_new_token()
-    except:
-        # если что-то пошло не так - получаем новый iam_token
-        create_new_token()
-
-    # чтение iam_token
-    with open(IAM_TOKEN_PATH, 'r') as f:
-        file_data = json.load(f)
-        iam_token = file_data["access_token"]
-
-    # чтение folder_id
-    with open(FOLDER_ID_PATH, 'r') as f:
-        folder_id = f.read().strip()
-
-    return iam_token, folder_id
-
-
-# чтение bot_token из файла
-def get_bot_token():
-    with open(BOT_TOKEN_PATH, 'r') as f:
-        return f.read().strip()
