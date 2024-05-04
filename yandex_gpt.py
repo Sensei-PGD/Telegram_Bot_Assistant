@@ -1,17 +1,14 @@
 import requests
 import logging  # модуль для сбора логов
 # подтягиваем константы из config файла
-from config import LOGS, MAX_GPT_TOKENS, SYSTEM_PROMPT, IAM_TOKEN_PATH , FOLDER_ID_PATH
-from creds import get_creds  # модуль для получения токенов
-
-iam_token, folder_id = get_creds()  # получаем iam_token и folder_id из файлов
+from config import LOGS, MAX_GPT_TOKENS, SYSTEM_PROMPT, IAM_TOKEN_PATH, FOLDER_ID_PATH
 
 # настраиваем запись логов в файл
 logging.basicConfig(filename=LOGS, level=logging.ERROR, format="%(asctime)s FILE: %(filename)s IN: %(funcName)s MESSAGE: %(message)s", filemode="w")
 
+
 IAM_TOKEN = IAM_TOKEN_PATH
 FOLDER_ID = FOLDER_ID_PATH
-
 
 # подсчитываем количество токенов в сообщениях
 def count_gpt_tokens(messages):
@@ -29,7 +26,6 @@ def count_gpt_tokens(messages):
     except Exception as e:
         logging.error(e)  # если ошибка - записываем её в логи
         return 0
-
 
 # запрос к GPT
 def ask_gpt(messages):
@@ -51,7 +47,7 @@ def ask_gpt(messages):
         response = requests.post(url, headers=headers, json=data)
         # проверяем статус код
         if response.status_code != 200:
-            return False, f"Ошибка GPT. Статус-код: {response.status_code}", None
+            return False, f"Ошибка GPT. Статус-код: {response.status_code}. Попробуйте  повторить ещё раз", None
         # если всё успешно - считаем количество токенов, потраченных на ответ, возвращаем статус, ответ, и количество токенов в ответе
         answer = response.json()['result']['alternatives'][0]['message']['text']
         tokens_in_answer = count_gpt_tokens([{'role': 'assistant', 'text': answer}])
