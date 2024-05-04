@@ -4,7 +4,7 @@ import math  # математический модуль для округлен
 from config import LOGS, MAX_USERS, MAX_USER_GPT_TOKENS, MAX_USER_TTS_SYMBOLS, MAX_USER_STT_BLOCKS
 # подтягиваем функции для работы с БД
 from database import count_users, count_all_limits
-from final.bot import bot
+
 # подтягиваем функцию для подсчета токенов в списке сообщений
 from yandex_gpt import count_gpt_tokens
 
@@ -27,41 +27,3 @@ def is_gpt_token_limit(messages, total_spent_tokens):
     if all_tokens > MAX_USER_GPT_TOKENS:
         return None, f"Превышен общий лимит GPT-токенов {MAX_USER_GPT_TOKENS}"
     return all_tokens, ""
-
-
-# проверяем, не превысил ли пользователь лимиты на преобразование аудио в текст
-def is_stt_block_limit(user_id, duration):
-    audio_blocks = math.ceil(duration / 15)
-    all_blocks = count_all_limits(user_id, 'audio_blocks') + audio_blocks
-    if duration >= 30:
-        msg = "SpeechKit STT работает с голосовыми сообщениями меньше 30 секунд"
-        bot.send_message(user_id, msg)
-        return None
-    if all_blocks >= MAX_USER_STT_BLOCKS:
-        msg = f"Превышен общий лимит SpeechKit STT {MAX_USER_STT_BLOCKS}. Использовано {all_blocks} блоков. Доступно: {MAX_USER_STT_BLOCKS - all_blocks}"
-        bot.send_message(user_id, msg)
-        return None
-
-    return audio_blocks
-
-
-# проверяем, не превысил ли пользователь лимиты на преобразование текста в аудио
-def is_tts_symbol_limit(user_id, text):
-    text_symbols = len(text)
-
-    all_symbols = count_all_limits(user_id, 'text_symbols')
-
-    if all_symbols is None:
-        all_symbols = 0
-
-    all_symbols += text_symbols
-
-    if all_symbols >= MAX_USER_TTS_SYMBOLS:
-        msg = f"Превышен общий лимит SpeechKit TTS {MAX_USER_TTS_SYMBOLS}. Использовано: {all_symbols} символов. Доступно: {MAX_USER_TTS_SYMBOLS - all_symbols}"
-        bot.send_message(user_id, msg)
-        return None
-    if text_symbols >= MAX_USER_TTS_SYMBOLS:
-        msg = f"Превышен лимит SpeechKit TTS на запрос {MAX_USER_TTS_SYMBOLS}, в сообщении {text_symbols} символов"
-        bot.send_message(user_id, msg)
-        return None
-    return len(text)
