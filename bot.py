@@ -4,13 +4,15 @@ import logging  # модуль для сбора логов
 from validators import *  # модуль для валидации
 from yandex_gpt import ask_gpt  # модуль для работы с GPT
 # подтягиваем константы из config файла
-from config import LOGS, COUNT_LAST_MSG
+from config import LOGS, COUNT_LAST_MSG, BOT_TOKEN_PATH
 # подтягиваем функции из database файла
-from database import create_database, add_message, select_n_last_messages
+from database import create_database, add_message, select_n_last_messages, count_all_blocks, insert_row, count_all_symbol, insert_row_tts
 from speechkit import speech_to_text, text_to_speech
-from creds import get_bot_token  # модуль для получения bot_token
 
-bot = telebot.TeleBot(get_bot_token())
+
+bot = telebot.TeleBot(BOT_TOKEN_PATH)
+create_database()
+
 
 # настраиваем запись логов в файл
 logging.basicConfig(filename=LOGS, level=logging.ERROR, format="%(asctime)s FILE: %(filename)s IN: %(funcName)s MESSAGE: %(message)s", filemode="w")
@@ -31,8 +33,18 @@ def help(message):
 # обрабатываем команду /debug - отправляем файл с логами
 @bot.message_handler(commands=['debug'])
 def debug(message):
-    with open("logs.txt", "rb") as f:
-        bot.send_document(message.chat.id, f)
+    try:
+        with open("logs.txt", "r") as f:
+            log_contents = f.read()
+            if log_contents:
+                bot.send_document(message.chat.id, open("logs.txt", "rb"))
+            else:
+                bot.send_message(message.chat.id, "Файл с логами пустой.")
+    except FileNotFoundError as e:
+        bot.send_message(message.chat.id, "Файл с логами не найден.")
+    except Exception as e:
+        bot.send_message(message.chat.id, "Произошла ошибка при обработке команды /debug.")
+        logging.error(e)
 
 
 @bot.message_handler(commands=['info'])  # получение информации о боте
@@ -50,56 +62,105 @@ def say_start(message):
                                       "\n/help - помощь"
                                       "\n/info - информация о боте"
                                       "\n/command - команды"
-                                      "\n/limits – ваш профиль с потраченными токенами/сессиями"
                                       "\n/debug - режим отладки бота"
                                       "\n/stt  - проверка stt"
                                       "\n/tts - проверка tts")
 
 
-@bot.message_handler(commands=['tts'])
-def call_tts_handler(message):
-    user_id = message.from_user.id
-    bot.send_message(user_id, 'Проверка режима синтеза речи, пришлите сообщение')
-    bot.register_next_step_handler(message, tts)
-
-
 @bot.message_handler(commands=['stt'])
 def stt_handler(message):
     user_id = message.from_user.id
-    bot.send_message(user_id, 'Проверка режима распознавания речи, пришлите голосовое сообщение')
+    bot.send_message(user_id, 'Проверка. Отправь голосовое сообщение, чтобы я его распознал!')
     bot.register_next_step_handler(message, stt)
+
+
+def stt(message):
+    user_id = message.from_user.id
+    if not message.voice:
+        return
+    stt_blocks, error_message = is_stt_block_limit(user_id, message)
+    if not stt_blocks:
+        bot.send_message(user_id, error_message)
+        return
+    file_id = message.voice.file_id
+    file_info = bot.get_file(file_id)
+    file = bot.download_file(file_info.file_path)
+    status, text = speech_to_text(file)
+    if status:
+        # Вызываем функцию insert_row() для сохранения значения stt_blocks в базе данных
+        insert_row(user_id, text, 'stt_blocks', stt_blocks)
+        bot.send_message(user_id, text, reply_to_message_id=message.id)
+    else:
+        bot.send_message(user_id, text)
+
+
+def is_stt_block_limit(user_id: int, message: telebot.types.Message):
+    duration = message.voice.duration
+    audio_blocks = math.ceil(duration / 15)
+    all_blocks = count_all_blocks(user_id)
+    if all_blocks is None:
+        all_blocks = 0
+    all_blocks += audio_blocks
+
+    if duration >= 30:
+        msg = "SpeechKit STT работает с голосовыми сообщениями меньше 30 секунд"
+        bot.send_message(user_id, msg)
+        return None, msg
+
+    if all_blocks >= MAX_USER_STT_BLOCKS:
+        msg = f"Превышен общий лимит SpeechKit STT {MAX_USER_STT_BLOCKS}. Использовано {all_blocks} блоков. Доступно: {MAX_USER_STT_BLOCKS - all_blocks}"
+        bot.send_message(user_id, msg)
+        return None, msg
+
+    # Подсчет и обновление количества использованных блоков STT
+    total_stt_blocks = count_all_blocks(user_id)
+    max_stt_blocks = MAX_USER_STT_BLOCKS
+
+    if total_stt_blocks is None:
+        total_stt_blocks = 0
+
+    if total_stt_blocks < max_stt_blocks:
+        total_stt_blocks += 1
+    else:
+        return None, "Превышен лимит блоков для распознавания речи."
+
+    return audio_blocks, None
+
+
+@bot.message_handler(commands=['tts'])
+def call_tts_handler(message):
+    user_id = message.from_user.id
+    bot.send_message(user_id, 'Проверка. Отправь следующим сообщением текст, чтобы я его озвучил!')
+    bot.register_next_step_handler(message, tts)
 
 
 def tts(message):
     user_id = message.from_user.id
     text = message.text
-    status_tts, voice_response = text_to_speech(text)
-    if status_tts:
-        bot.send_voice(user_id, voice_response)
+    if message.content_type != 'text':
+        bot.send_message(user_id, 'Отправь текстовое сообщение')
+        return
+    tts_symbol, error_message = is_tts_symbol_limit(message, text)
+    if not tts_symbol:
+        bot.send_message(user_id, error_message)
+        return
+    insert_row_tts(user_id, text, tts_symbol)
+    status, content = text_to_speech(text)
+    if status:
+        bot.send_voice(user_id, content)
     else:
-        bot.send_message(user_id, "Не удалось синтезировать речь")
+        bot.send_message(user_id, content)
 
 
-def stt(message):
-    user_id = message.from_user.id
-
-    if message.voice:
-        duration = message.voice.duration
-        stt_blocks = is_stt_block_limit(user_id, duration)
-        if stt_blocks:
-            bot.send_message(user_id, "Речь распознана: " + message.voice.file_id)
-            full_message = {
-                'message': message.voice.file_id,
-                'role': 'user',
-                'total_gpt_tokens': 0,
-                'tts_symbols': 0,
-                'stt_blocks': stt_blocks
-            }
-            add_message(user_id, full_message)
-        else:
-            bot.send_message(user_id, "Превышен лимит распознавания речи.")
-    else:
-        bot.send_message(user_id, "Пришлите голосовое сообщение для распознавания.")
+def is_tts_symbol_limit(user_id, text):
+    text_symbols = len(text)
+    all_symbols = count_all_symbol(user_id)
+    if all_symbols is None:
+        all_symbols = 0
+    all_symbols += text_symbols
+    if all_symbols >= MAX_USER_TTS_SYMBOLS:
+        return None, f"Превышен общий лимит SpeechKit TTS {MAX_USER_TTS_SYMBOLS}. Использовано: {all_symbols} символов. Доступно: {MAX_USER_TTS_SYMBOLS - all_symbols}"
+    return text_symbols, None
 
 
 # обрабатываем голосовые сообщения
@@ -112,7 +173,8 @@ def handle_voice(message: telebot.types.Message):
         if not status_check_users:
             bot.send_message(user_id, error_message)
             return
-        stt_blocks, error_message = is_stt_block_limit(user_id, message.voice.duration)
+        #stt_blocks, error_message = is_stt_block_limit(user_id, message.voice.duration)
+        stt_blocks, error_message = is_stt_block_limit(user_id, message)
         if error_message:
             bot.send_message(user_id, error_message)
             return
@@ -146,10 +208,9 @@ def handle_voice(message: telebot.types.Message):
             bot.send_message(user_id, answer_gpt, reply_to_message_id=message.id)
     except Exception as e:
         logging.error(e)
-        bot.send_message(message.from_user.id, "Не получилось ответить. Попробуй записать другое сообщение") #user_id
+        bot.send_message(message.from_user.id, "Не получилось ответить. Попробуй записать другое сообщение")
 
 
-# обрабатываем текстовые сообщения
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
     try:
@@ -204,16 +265,6 @@ def handler(message):
 @bot.message_handler(content_types=['photo', 'video', 'document', 'sticker'])
 def handle_non_text_message(message):
     bot.send_message(message.chat.id, "❗ Извините, не могу обработать фотографии, видео, документы или стикеры.")
-
-
-@bot.message_handler(commands=['limits'])
-def limits(message):
-    user_id = message.from_user.id
-    total_tokens = count_all_limits(user_id, 'total_gpt_tokens')
-    if total_tokens is not None:
-        bot.send_message(user_id, f"Общее количество потраченных токенов: {total_tokens}")
-    else:
-        bot.send_message(user_id, "У вас нет потраченных токенов или лимит их использования не установлен!")
 
 
 # запускаем бота
