@@ -6,9 +6,9 @@ from config import LOGS, DB_FILE
 # настраиваем запись логов в файл
 logging.basicConfig(filename=LOGS, level=logging.ERROR, format="%(asctime)s FILE: %(filename)s IN: %(funcName)s MESSAGE: %(message)s", filemode="w")
 path_to_db = DB_FILE  # файл базы данных
+DB_FILE = "chatbot.db"
 
 
-# создаём базу данных и таблицу messages
 def create_database():
     try:
         # подключаемся к базе данных
@@ -30,8 +30,6 @@ def create_database():
         logging.error(e)  # если ошибка - записываем её в логи
         return None
 
-
-# добавляем новое сообщение в таблицу messages
 def add_message(user_id, full_message):
     try:
         # подключаемся к базе данных
@@ -50,7 +48,6 @@ def add_message(user_id, full_message):
     except Exception as e:
         logging.error(e)  # если ошибка - записываем её в логи
         return None
-
 
 # считаем количество уникальных пользователей помимо самого пользователя
 def count_users(user_id):
@@ -93,7 +90,6 @@ def select_n_last_messages(user_id, n_last_messages=4):
         logging.error(e)  # если ошибка - записываем её в логи
         return messages, total_spent_tokens
 
-
 # подсчитываем количество потраченных пользователем ресурсов (<limit_type> - символы или аудиоблоки)
 def count_all_limits(user_id, limit_type):
     try:
@@ -115,3 +111,69 @@ def count_all_limits(user_id, limit_type):
     except Exception as e:
         logging.error(e)  # если ошибка - записываем её в логи
         return 0
+
+
+def insert_row(user_id, message, cell, value):
+    try:
+        with sqlite3.connect(path_to_db) as conn:
+            cursor = conn.cursor()
+            if cell == 'tts_symbols':
+                cursor.execute('''INSERT INTO messages (user_id, message, {}) VALUES (?, ?, ?)'''.format(cell),
+                               (user_id, message, value))
+            else:
+                cursor.execute('''INSERT INTO messages (user_id, message, {}) VALUES (?, ?, 0)'''.format(cell),
+                               (user_id, message))
+            conn.commit()
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+# stt
+def count_all_blocks(user_id):
+    # Функция подсчета всех блоков STT для данного пользователя
+    try:
+        with sqlite3.connect(path_to_db) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''SELECT SUM(stt_blocks) FROM messages WHERE user_id=?''', (user_id,))
+            data = cursor.fetchone()
+            if data and data[0]:
+                return data[0]
+            else:
+                return 0
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+# TTS
+def insert_row_tts(user_id, message, tts_symbols):
+    try:
+        # Подключаемся к базе
+        with sqlite3.connect(path_to_db) as conn:
+            cursor = conn.cursor()
+            # Вставляем в таблицу новое сообщение
+            cursor.execute('''INSERT INTO messages (user_id, message, tts_symbols)VALUES (?, ?, ?)''',
+                           (user_id, message, tts_symbols))
+            # Сохраняем изменения
+            conn.commit()
+    except Exception as e:  # обрабатываем ошибку и записываем её в переменную <e>
+        print(f"Error: {e}")  # выводим ошибку в консоль
+
+
+def count_all_symbol(user_id):
+    try:
+        # Подключаемся к базе
+        with sqlite3.connect(path_to_db) as conn:
+            cursor = conn.cursor()
+            # Считаем, сколько символов использовал пользователь
+            cursor.execute('''SELECT SUM(tts_symbols) FROM messages WHERE user_id=?''', (user_id,))
+            data = cursor.fetchone()
+            # Проверяем data на наличие хоть какого-то полученного результата запроса
+            # И на то, что в результате запроса мы получили какое-то число в data[0]
+            if data and data[0]:
+                # Если результат есть и data[0] == какому-то числу, то
+                return data[0]  # возвращаем это число - сумму всех потраченных символов
+            else:
+                # Результата нет, так как у нас ещё нет записей о потраченных символах
+                return 0  # возвращаем 0
+    except Exception as e:
+        print(f"Error: {e}")
