@@ -6,7 +6,7 @@ from yandex_gpt import ask_gpt  # модуль для работы с GPT
 # подтягиваем константы из config файла
 from config import LOGS, COUNT_LAST_MSG, BOT_TOKEN_PATH
 # подтягиваем функции из database файла
-from database import create_database, add_message, select_n_last_messages, count_all_blocks, insert_row, count_all_symbol, insert_row_tts
+from database import create_database, add_message, select_n_last_messages, insert_row, insert_row_tts #count_all_symbol
 from speechkit import speech_to_text, text_to_speech
 
 
@@ -87,43 +87,27 @@ def stt(message):
     file = bot.download_file(file_info.file_path)
     status, text = speech_to_text(file)
     if status:
-        # Вызываем функцию insert_row() для сохранения значения stt_blocks в базе данных
-        insert_row(user_id, text, 'stt_blocks', stt_blocks)
+        insert_row(user_id, text, 'some_role', 'some_tokens', 'some_symbols', stt_blocks)  # Добавлен параметр stt_blocks
         bot.send_message(user_id, text, reply_to_message_id=message.id)
     else:
         bot.send_message(user_id, text)
 
 
-def is_stt_block_limit(user_id: int, message: telebot.types.Message):
+def is_stt_block_limit(user_id, message):
     duration = message.voice.duration
     audio_blocks = math.ceil(duration / 15)
-    all_blocks = count_all_blocks(user_id)
+    all_blocks = count_all_limits(user_id, 'stt_blocks')
     if all_blocks is None:
         all_blocks = 0
     all_blocks += audio_blocks
-
     if duration >= 30:
         msg = "SpeechKit STT работает с голосовыми сообщениями меньше 30 секунд"
         bot.send_message(user_id, msg)
         return None, msg
-
     if all_blocks >= MAX_USER_STT_BLOCKS:
         msg = f"Превышен общий лимит SpeechKit STT {MAX_USER_STT_BLOCKS}. Использовано {all_blocks} блоков. Доступно: {MAX_USER_STT_BLOCKS - all_blocks}"
         bot.send_message(user_id, msg)
         return None, msg
-
-    # Подсчет и обновление количества использованных блоков STT
-    total_stt_blocks = count_all_blocks(user_id)
-    max_stt_blocks = MAX_USER_STT_BLOCKS
-
-    if total_stt_blocks is None:
-        total_stt_blocks = 0
-
-    if total_stt_blocks < max_stt_blocks:
-        total_stt_blocks += 1
-    else:
-        return None, "Превышен лимит блоков для распознавания речи."
-
     return audio_blocks, None
 
 
@@ -140,21 +124,19 @@ def tts(message):
     if message.content_type != 'text':
         bot.send_message(user_id, 'Отправь текстовое сообщение')
         return
-    tts_symbol, error_message = is_tts_symbol_limit(message, text)
-    if not tts_symbol:
+    tts_symbols, error_message = is_tts_symbol_limit(user_id, message.text)  # Указываем user_id и текст сообщения
+    if not tts_symbols:
         bot.send_message(user_id, error_message)
         return
-    insert_row_tts(user_id, text, tts_symbol)
+    insert_row_tts(user_id, text, 'some_role', 'some_tokens', tts_symbols)  # Указываем user_id, текст, роль и количество использованных символов TTS
     status, content = text_to_speech(text)
     if status:
         bot.send_voice(user_id, content)
     else:
         bot.send_message(user_id, content)
-
-
 def is_tts_symbol_limit(user_id, text):
     text_symbols = len(text)
-    all_symbols = count_all_symbol(user_id)
+    all_symbols = count_all_limits(user_id, 'tts_symbols')  # Передаем user_id и тип лимита (tts_symbols)
     if all_symbols is None:
         all_symbols = 0
     all_symbols += text_symbols
