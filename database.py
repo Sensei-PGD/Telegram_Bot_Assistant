@@ -30,6 +30,7 @@ def create_database():
         logging.error(e)  # если ошибка - записываем её в логи
         return None
 
+
 def add_message(user_id, full_message):
     try:
         # подключаемся к базе данных
@@ -48,6 +49,7 @@ def add_message(user_id, full_message):
     except Exception as e:
         logging.error(e)  # если ошибка - записываем её в логи
         return None
+
 
 # считаем количество уникальных пользователей помимо самого пользователя
 def count_users(user_id):
@@ -90,90 +92,54 @@ def select_n_last_messages(user_id, n_last_messages=4):
         logging.error(e)  # если ошибка - записываем её в логи
         return messages, total_spent_tokens
 
-# подсчитываем количество потраченных пользователем ресурсов (<limit_type> - символы или аудиоблоки)
+
+def insert_row(user_id, message, role, total_gpt_tokens, tts_symbols, stt_blocks):
+    global conn
+    try:
+        conn = sqlite3.connect(path_to_db)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO messages (user_id, message, role, total_gpt_tokens, tts_symbols, stt_blocks) 
+            VALUES (?, ?, ?, ?, ?, ?)''',
+            (user_id, message, role, total_gpt_tokens, tts_symbols, stt_blocks))
+        conn.commit()
+        logging.info(f"DATABASE: INSERT INTO messages VALUES ({user_id}, {message}, {role}, {total_gpt_tokens}, {tts_symbols}, {stt_blocks})")
+    except Exception as e:
+        logging.error(e)
+    finally:
+        conn.close()
+
+
 def count_all_limits(user_id, limit_type):
     try:
-        # подключаемся к базе данных
         with sqlite3.connect(path_to_db) as conn:
             cursor = conn.cursor()
-            # считаем лимиты по <limit_type>, которые использовал пользователь
-            cursor.execute(f'''SELECT SUM({limit_type}) FROM messages WHERE user_id=?''', (user_id,))
-            data = cursor.fetchone()
-            # проверяем data на наличие хоть какого-то полученного результата запроса
-            # и на то, что в результате запроса мы получили какое-то число в data[0]
-            if data and data[0]:
-                # если результат есть и data[0] == какому-то числу, то:
-                logging.info(f"DATABASE: У user_id={user_id} использовано {data[0]} {limit_type}")
-                return data[0]  # возвращаем это число - сумму всех потраченных <limit_type>
-            else:
-                # результата нет, так как у нас ещё нет записей о потраченных <limit_type>
-                return 0  # возвращаем 0
-    except Exception as e:
-        logging.error(e)  # если ошибка - записываем её в логи
-        return 0
-
-
-def insert_row(user_id, message, cell, value):
-    try:
-        with sqlite3.connect(path_to_db) as conn:
-            cursor = conn.cursor()
-            if cell == 'tts_symbols':
-                cursor.execute('''INSERT INTO messages (user_id, message, {}) VALUES (?, ?, ?)'''.format(cell),
-                               (user_id, message, value))
-            else:
-                cursor.execute('''INSERT INTO messages (user_id, message, {}) VALUES (?, ?, 0)'''.format(cell),
-                               (user_id, message))
-            conn.commit()
-    except Exception as e:
-        print(f"Error: {e}")
-
-
-# stt
-def count_all_blocks(user_id):
-    # Функция подсчета всех блоков STT для данного пользователя
-    try:
-        with sqlite3.connect(path_to_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''SELECT SUM(stt_blocks) FROM messages WHERE user_id=?''', (user_id,))
+            cursor.execute(f'SELECT SUM({limit_type}) FROM messages WHERE user_id=?', (user_id,))
             data = cursor.fetchone()
             if data and data[0]:
+                logging.info(f"DATABASE: User_id={user_id} used {data[0]} {limit_type}")
                 return data[0]
             else:
                 return 0
     except Exception as e:
-        print(f"Error: {e}")
+        logging.error(e)
+        return 0
 
 
 # TTS
-def insert_row_tts(user_id, message, tts_symbols):
-    try:
-        # Подключаемся к базе
-        with sqlite3.connect(path_to_db) as conn:
-            cursor = conn.cursor()
-            # Вставляем в таблицу новое сообщение
-            cursor.execute('''INSERT INTO messages (user_id, message, tts_symbols)VALUES (?, ?, ?)''',
-                           (user_id, message, tts_symbols))
-            # Сохраняем изменения
-            conn.commit()
-    except Exception as e:  # обрабатываем ошибку и записываем её в переменную <e>
-        print(f"Error: {e}")  # выводим ошибку в консоль
 
-
-def count_all_symbol(user_id):
+def insert_row_tts(user_id, message, role, total_gpt_tokens, tts_symbols):
+    global conn
     try:
-        # Подключаемся к базе
-        with sqlite3.connect(path_to_db) as conn:
-            cursor = conn.cursor()
-            # Считаем, сколько символов использовал пользователь
-            cursor.execute('''SELECT SUM(tts_symbols) FROM messages WHERE user_id=?''', (user_id,))
-            data = cursor.fetchone()
-            # Проверяем data на наличие хоть какого-то полученного результата запроса
-            # И на то, что в результате запроса мы получили какое-то число в data[0]
-            if data and data[0]:
-                # Если результат есть и data[0] == какому-то числу, то
-                return data[0]  # возвращаем это число - сумму всех потраченных символов
-            else:
-                # Результата нет, так как у нас ещё нет записей о потраченных символах
-                return 0  # возвращаем 0
+        conn = sqlite3.connect(path_to_db)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO messages (user_id, message, role, total_gpt_tokens, tts_symbols)
+            VALUES (?, ?, ?, ?, ?)''',
+            (user_id, message, role, total_gpt_tokens, tts_symbols))
+        conn.commit()
+        logging.info(f"DATABASE: INSERT INTO messages VALUES ({user_id}, {message}, {role}, {total_gpt_tokens}, {tts_symbols})")
     except Exception as e:
-        print(f"Error: {e}")
+        logging.error(e)
+    finally:
+        conn.close()
